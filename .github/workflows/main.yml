@@ -1,0 +1,76 @@
+on:
+  pull_request:
+    branches:
+      - main
+      - dev-ariel
+      - master
+  push:
+    branches:
+      - main
+      - master
+      - dev-ariel
+name: 'Build and Release'
+jobs:
+  build:
+    name: Build Literaku
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the branch
+        uses: actions/checkout@v4
+
+      - name: Setup JAVA
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: "12.x"
+          cache: 'gradle'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Set keystore from JKS
+        id: android_keystore
+        uses: timheuer/base64-to-file@v1.0.3
+        with:
+          fileName: upload-keystore.jks
+          encodedString: ${{ secrets.JKS_FILES }}
+
+      - name: Provide Properties
+        run: |
+          echo "storeFile=${{ steps.android_keystore.outputs.filePath }}" > android/key.properties
+          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+
+      - name: Provide Environment Variables
+        run: |
+          echo "API_KEY=${{ env.API_KEY }}" > .env
+          echo "SEARCH_ENGINE_ID=${{ env.SEARCH_ENGINE_ID }}" > .env
+
+      - name: Testing First
+        run: flutter test
+
+      # Release jika itu pull request
+      - name: Start Android Release Build
+        if: success() && github.event_name == 'pull'
+        run: flutter build apk --release
+      - name: Upload Android Release
+        uses: actions/upload-artifact@v2
+        with:
+          name: android-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Release APK
+        if: success() && github.event_name == 'pull'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          tag_name: v3.0.${{ github.run_number }}
+          title: Release v3.0.${{ github.run_number }}
+          token: ${{ secrets.TOKEN }}
